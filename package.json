@@ -1,26 +1,16 @@
 {
-  "name": "aave_v3_liquidation_tracker",
-  "type": "module",
+  "name": "aave-liquidation-tracker",
   "private": true,
+  "workspaces": [
+    "ui",
+    "server"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
-    "hono": "^4.10.3",
-    "next": "^16.0.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "swr": "^2.3.6",
-    "viem": "^2.38.4",
-    "zod": "^4.1.12"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5.0.0"
+    "dev:ui": "cd ui && bun run dev",
+    "dev:server": "cd server && bun run dev",
+    "build": "cd ui && bun run build && cd ../server && bun run build",
+    "start:ui": "cd ui && bun run start",
+    "start:server": "cd server && bun run start",
+    "test:server": "cd server && bun run test"
   }
 }
