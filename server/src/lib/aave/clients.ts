@@ -6,7 +6,7 @@ import { getEnv } from "@/lib/utils/env";
 type HttpClient = PublicClient<Transport, Chain>;
 type WsClient = PublicClient<WebSocketTransport, Chain>;
 
-const rpcFallback = "https://mainnet.infura.io/v3/";
+const rpcFallback = "https://rpc.mevblocker.io";
 
 const globalClients = globalThis as unknown as {
   __aave_http_client?: HttpClient;
