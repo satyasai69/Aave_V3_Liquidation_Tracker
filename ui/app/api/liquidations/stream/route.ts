@@ -1,6 +1,12 @@
 import { NextRequest } from "next/server";
-import { getSnapshot, getLiquidationsCollectionDirect } from "@/lib/liquidations";
-import type { ChangeStream } from "mongodb";
+import {
+  getSnapshot,
+  getLiquidationsCollectionDirect,
+} from "@/lib/liquidations";
+import type {
+  ChangeStream,
+  ChangeStreamInsertDocument,
+} from "mongodb";
 import type { NormalizedLiquidationEvent } from "@/types/liquidation";
 
 export const revalidate = 0;
@@ -21,8 +27,12 @@ export async function GET(request: NextRequest) {
   });
 
   const collection = await getLiquidationsCollectionDirect();
-  let changeStream: ChangeStream<NormalizedLiquidationEvent> | null =
-    null;
+  let changeStream:
+    | ChangeStream<
+        NormalizedLiquidationEvent,
+        ChangeStreamInsertDocument<NormalizedLiquidationEvent>
+      >
+    | null = null;
   let closed = false;
 
   const closeStream = async () => {
@@ -36,7 +46,10 @@ export async function GET(request: NextRequest) {
       const snapshot = await getSnapshot();
       streamController.enqueue(toSSE("snapshot", snapshot));
 
-      changeStream = collection.watch(
+      changeStream = collection.watch<
+        NormalizedLiquidationEvent,
+        ChangeStreamInsertDocument<NormalizedLiquidationEvent>
+      >(
         [
           {
             $match: {
