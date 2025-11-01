@@ -54,6 +54,23 @@ bun run dev:server
 
 This continuously backfills and streams events into MongoDB.
 
+#### Run the server in Docker
+
+The `server/` workspace ships with a multi-stage Dockerfile. Build and run it by pointing the container at the same environment variables you would use locally:
+
+```bash
+cd server
+docker build -t aave-liquidation-server .
+
+# Provide configuration via --env-file or individual -e flags
+docker run --rm \
+  --env-file .env \
+  -p 4000:4000 \
+  aave-liquidation-server
+```
+
+> The container exposes port `4000` by default. When deploying, ensure the MongoDB + RPC credentials supplied to the container have the required permissions.
+
 ### 3. Configure the UI (`ui/.env.local`)
 
 Create `ui/.env.local` with Mongo credentials (Next.js server components only – **do not** prefix with `NEXT_PUBLIC_`):
