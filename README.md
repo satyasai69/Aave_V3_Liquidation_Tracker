@@ -106,7 +106,7 @@ This builds the Next.js UI (`.next`) and compiles the server (`dist/`). Deploy e
 - **Persistence** – Events inserted into `liquidations` collection (`server/src/lib/db/*`). Aggregations (summary, timeline, distribution) are executed lazily by the consumer.
 - **Server API** – Hono app (`server/src/lib/api/app.ts`) still exposes `/liquidations/*` endpoints for compatibility, but the UI no longer depends on them.
 - **UI Data Layer** – `ui/lib/mongo.ts` and `ui/lib/liquidations.ts` encapsulate Mongo connections/queries. Next.js route handlers serve snapshot/stream responses, and `LiquidationDashboard.tsx` consumes them via SWR + SSE.
-- **Data Model** – Events store raw token amounts (stringified decimals) plus helper fields (e.g., `liquidatorLabel`, `notionalUsd` still persisted for legacy clients, but the UI ignores USD values).
+- **Data Model** – Events store raw token amounts (stringified decimals) alongside helper fields such as `notionalUsd`; the UI displays token amounts only.
 
 ## Useful Commands
 

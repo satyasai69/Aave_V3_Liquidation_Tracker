@@ -6,7 +6,7 @@ type GlobalWithLogger = typeof globalThis & {
 };
 
 const createLogger = () => {
-  const options: LoggerOptions = {
+  const options: LoggerOptions<string> = {
     level: getEnv().LOG_LEVEL,
   };
 

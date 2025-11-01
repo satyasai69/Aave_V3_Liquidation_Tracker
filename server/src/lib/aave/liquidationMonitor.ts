@@ -12,7 +12,6 @@ import { parseAbiItem, formatUnits } from "viem";
 import type {
   Address,
   Hex,
-  Log,
   WatchBlocksReturnType,
 } from "viem";
 
@@ -68,6 +67,18 @@ type TxAggregate = {
   blockNumber: bigint;
   debtBurns: DebtBurnLog[];
   collateralMovements: CollateralMovementLog[];
+};
+
+type TransferLog = {
+  address: Address;
+  transactionHash: Hex | null | undefined;
+  logIndex: number | null;
+  blockNumber: bigint | null;
+  args?: {
+    from: Address;
+    to: Address;
+    value: bigint;
+  } | null;
 };
 
 type ReserveAddresses = {
@@ -404,23 +415,11 @@ class LiquidationMonitor {
 
     const aggregates = new Map<Hex, TxAggregate>();
 
-    const ensureAggregate = (
-      log: Log<
-        bigint,
-        number,
-        number,
-        Address,
-        [],
-        Hex,
-        bigint,
-        false,
-        {
-          from: Address;
-          to: Address;
-          value: bigint;
-        }
-      >,
-    ) => {
+    const ensureAggregate = (log: TransferLog) => {
+      if (!log.transactionHash || log.logIndex == null || log.blockNumber == null) {
+        return null;
+      }
+
       let aggregate = aggregates.get(log.transactionHash);
       if (!aggregate) {
         aggregate = {
@@ -433,12 +432,18 @@ class LiquidationMonitor {
       return aggregate;
     };
 
-    for (const log of debtLogs) {
+    const addDebtLog = (log: TransferLog) => {
+      if (!log.args || !log.transactionHash || log.logIndex == null || log.blockNumber == null) {
+        return;
+      }
+
       const reserve = lookup.byToken.get(normalize(log.address));
-      if (!reserve) continue;
-      if (log.args.to !== ZERO_ADDRESS) continue;
+      if (!reserve) return;
+      if (log.args.to !== ZERO_ADDRESS) return;
 
       const aggregate = ensureAggregate(log);
+      if (!aggregate) return;
+
       aggregate.debtBurns.push({
         reserve,
         borrower: log.args.from,
@@ -448,34 +453,28 @@ class LiquidationMonitor {
         blockNumber: log.blockNumber,
         tokenAddress: log.address,
       });
-    }
+    };
 
-    for (const log of aTokenLogs) {
-      const reserve = lookup.byToken.get(normalize(log.address));
-      if (!reserve) continue;
+    const addCollateralLog = (log: TransferLog, type: "aToken" | "underlying") => {
+      if (!log.args || !log.transactionHash || log.logIndex == null || log.blockNumber == null) {
+        return;
+      }
 
-      const aggregate = ensureAggregate(log);
-      aggregate.collateralMovements.push({
-        reserve,
-        from: log.args.from,
-        to: log.args.to,
-        amount: log.args.value,
-        txHash: log.transactionHash,
-        logIndex: log.logIndex,
-        blockNumber: log.blockNumber,
-        tokenAddress: log.address,
-        type: "aToken",
-      });
-    }
+      const reserveLookup =
+        type === "underlying" ? lookup.byUnderlying : lookup.byToken;
+      const reserve = reserveLookup.get(normalize(log.address));
+      if (!reserve) return;
 
-    for (const log of underlyingLogs) {
-      const reserve = lookup.byUnderlying.get(normalize(log.address));
-      if (!reserve) continue;
-      if (normalize(log.args.from) !== normalize(AAVE_V3_MAINNET_POOL_ADDRESS)) {
-        continue;
+      if (
+        type === "underlying" &&
+        normalize(log.args.from) !== normalize(AAVE_V3_MAINNET_POOL_ADDRESS)
+      ) {
+        return;
       }
 
       const aggregate = ensureAggregate(log);
+      if (!aggregate) return;
+
       aggregate.collateralMovements.push({
         reserve,
         from: log.args.from,
@@ -485,9 +484,13 @@ class LiquidationMonitor {
         logIndex: log.logIndex,
         blockNumber: log.blockNumber,
         tokenAddress: log.address,
-        type: "underlying",
+        type,
       });
-    }
+    };
+
+    debtLogs.forEach(addDebtLog);
+    aTokenLogs.forEach(log => addCollateralLog(log, "aToken"));
+    underlyingLogs.forEach(log => addCollateralLog(log, "underlying"));
 
     for (const aggregate of aggregates.values()) {
       await this.constructEvents(aggregate);
@@ -499,12 +502,12 @@ class LiquidationMonitor {
     addresses: Address[],
     fromBlock: bigint,
     toBlock: bigint,
-  ): Promise<Log[]> {
+  ): Promise<TransferLog[]> {
     if (addresses.length === 0 || fromBlock > toBlock) {
       return [];
     }
 
-    const logs: Log[] = [];
+    const logs: TransferLog[] = [];
     let currentFrom = fromBlock;
 
     while (currentFrom <= toBlock) {
@@ -529,18 +532,18 @@ class LiquidationMonitor {
     finalToBlock: bigint,
     span: bigint,
     attempt = 0,
-  ): Promise<{ records: Log[]; nextFrom: bigint }> {
+  ): Promise<{ records: TransferLog[]; nextFrom: bigint }> {
     const toBlockCandidate = fromBlock + span - 1n;
     const toBlock =
       toBlockCandidate > finalToBlock ? finalToBlock : toBlockCandidate;
 
     try {
-      const records = await client.getLogs({
+      const records = (await client.getLogs({
         address: addresses,
         event: TRANSFER_EVENT,
         fromBlock,
         toBlock,
-      });
+      })) as TransferLog[];
 
       if (LOG_FETCH_THROTTLE_MS > 0 && toBlock < finalToBlock) {
         await sleep(LOG_FETCH_THROTTLE_MS);
@@ -773,11 +776,10 @@ class LiquidationMonitor {
       const movementWithLiquidator =
         underlyingMovement ?? rewardMovement ?? collateralMovement;
 
-      const liquidator = movementWithLiquidator.from;
-
-      const liquidatorLabel =
-        normalize(liquidator) !== ZERO_ADDRESS
-          ? liquidator
+      const rawLiquidator = movementWithLiquidator.from;
+      const resolvedLiquidator =
+        normalize(rawLiquidator) !== ZERO_ADDRESS
+          ? rawLiquidator
           : movementWithLiquidator.to;
 
       const event: NormalizedLiquidationEvent = {
@@ -800,15 +802,11 @@ class LiquidationMonitor {
         debtValueUsd,
         notionalUsd: Math.max(collateralValueUsd, debtValueUsd),
         user: debtBurn.borrower,
-        liquidator:
-          normalize(liquidator) !== ZERO_ADDRESS
-            ? liquidator
-            : movementWithLiquidator.to,
-        liquidatorLabel,
+        liquidator: resolvedLiquidator,
         receiveAToken:
           underlyingMovement === null &&
           rewardMovement?.type === "aToken" &&
-          normalize(liquidator) !== ZERO_ADDRESS,
+          normalize(resolvedLiquidator) !== ZERO_ADDRESS,
       };
 
       const inserted = await liquidationStore.addEvent(event);
