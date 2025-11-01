@@ -9,11 +9,7 @@ import { liquidationStore } from "@/lib/store/liquidationStore";
 import type { NormalizedLiquidationEvent } from "@/lib/types/liquidation";
 import { logger } from "@/lib/utils/logger";
 import { parseAbiItem, formatUnits } from "viem";
-import type {
-  Address,
-  Hex,
-  WatchBlocksReturnType,
-} from "viem";
+import type { Address, Hex, WatchBlocksReturnType } from "viem";
 
 const TRANSFER_EVENT = parseAbiItem(
   "event Transfer(address indexed from, address indexed to, uint256 value)",
@@ -71,14 +67,14 @@ type TxAggregate = {
 
 type TransferLog = {
   address: Address;
-  transactionHash: Hex | null | undefined;
-  logIndex: number | null;
-  blockNumber: bigint | null;
-  args?: {
+  transactionHash: Hex;
+  logIndex: number;
+  blockNumber: bigint;
+  args: {
     from: Address;
     to: Address;
     value: bigint;
-  } | null;
+  };
 };
 
 type ReserveAddresses = {
@@ -416,10 +412,6 @@ class LiquidationMonitor {
     const aggregates = new Map<Hex, TxAggregate>();
 
     const ensureAggregate = (log: TransferLog) => {
-      if (!log.transactionHash || log.logIndex == null || log.blockNumber == null) {
-        return null;
-      }
-
       let aggregate = aggregates.get(log.transactionHash);
       if (!aggregate) {
         aggregate = {
@@ -433,16 +425,11 @@ class LiquidationMonitor {
     };
 
     const addDebtLog = (log: TransferLog) => {
-      if (!log.args || !log.transactionHash || log.logIndex == null || log.blockNumber == null) {
-        return;
-      }
-
       const reserve = lookup.byToken.get(normalize(log.address));
       if (!reserve) return;
       if (log.args.to !== ZERO_ADDRESS) return;
 
       const aggregate = ensureAggregate(log);
-      if (!aggregate) return;
 
       aggregate.debtBurns.push({
         reserve,
@@ -455,11 +442,10 @@ class LiquidationMonitor {
       });
     };
 
-    const addCollateralLog = (log: TransferLog, type: "aToken" | "underlying") => {
-      if (!log.args || !log.transactionHash || log.logIndex == null || log.blockNumber == null) {
-        return;
-      }
-
+    const addCollateralLog = (
+      log: TransferLog,
+      type: "aToken" | "underlying",
+    ) => {
       const reserveLookup =
         type === "underlying" ? lookup.byUnderlying : lookup.byToken;
       const reserve = reserveLookup.get(normalize(log.address));
@@ -473,7 +459,6 @@ class LiquidationMonitor {
       }
 
       const aggregate = ensureAggregate(log);
-      if (!aggregate) return;
 
       aggregate.collateralMovements.push({
         reserve,
@@ -538,12 +523,42 @@ class LiquidationMonitor {
       toBlockCandidate > finalToBlock ? finalToBlock : toBlockCandidate;
 
     try {
-      const records = (await client.getLogs({
+      const rawRecords = (await client.getLogs({
         address: addresses,
         event: TRANSFER_EVENT,
         fromBlock,
         toBlock,
-      })) as TransferLog[];
+      })) as Array<{
+        address: Address;
+        transactionHash?: Hex | null;
+        logIndex?: number | null;
+        blockNumber?: bigint | null;
+        args?: {
+          from: Address;
+          to: Address;
+          value: bigint;
+        } | null;
+      }>;
+
+      const records: TransferLog[] = [];
+      for (const log of rawRecords) {
+        if (
+          !log.transactionHash ||
+          log.logIndex == null ||
+          log.blockNumber == null ||
+          !log.args
+        ) {
+          continue;
+        }
+
+        records.push({
+          address: log.address,
+          transactionHash: log.transactionHash,
+          logIndex: log.logIndex,
+          blockNumber: log.blockNumber,
+          args: log.args,
+        });
+      }
 
       if (LOG_FETCH_THROTTLE_MS > 0 && toBlock < finalToBlock) {
         await sleep(LOG_FETCH_THROTTLE_MS);
